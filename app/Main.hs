@@ -7,13 +7,11 @@ import Control.Concurrent.Async
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad (mzero)
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Resource (runResourceT)
 import Data.Aeson
 import Data.Maybe
 import Data.Function ((&))
 import Data.Monoid ((<>))
-import Data.String.Conversions (cs)
 import Data.Time.Clock
 import System.Console.ANSI
 import System.Directory (doesDirectoryExist, doesFileExist, getDirectoryContents)
@@ -49,8 +47,8 @@ instance FromJSON GoogleTranslation where
 main :: IO ()
 main = do
   startTime <- getCurrentTime >>= (return . utctDayTime)
-  progName <- getProgName >>= (return . cs)
-  args <- getArgs >>= (return . map cs)
+  progName <- getProgName >>= (return . T.pack)
+  args <- getArgs >>= (return . map T.pack)
   case args of
     [ i18nFolderPath, fromLocale, apiKey ] -> do
       i18nFiles <- getSourceYAMLPaths i18nFolderPath fromLocale
@@ -73,7 +71,7 @@ main = do
               mapM_ T.putStrLn [ fromJust err | err <- errors, isJust err ]
               T.putStrLn "\n"
               setSGR [ Reset ]
-          T.putStr $ "Task completed in " <> (cs $ show $ roundN 2 secondsElapsed) <> " seconds.\n"
+          T.putStr $ "Task completed in " <> (T.pack $ show $ roundN 2 secondsElapsed) <> " seconds.\n"
           T.putStrLn "\n"
     _ ->
       T.putStrLn $ "Usage: " <> progName <> " [i18n-yaml-folder-path] [from-locale] [fasdfafdafa]"
@@ -90,11 +88,11 @@ getIntoLocales = Map.fromList [ ("es", "Spanish"), ("de", "German"), ("hi", "Hin
 
 getSourceYAMLPaths :: T.Text -> T.Text -> IO [T.Text]
 getSourceYAMLPaths i18nFolderPath forLocale = do
-  let pathAsString = cs i18nFolderPath
+  let pathAsString = T.unpack i18nFolderPath
   isFolder <- doesDirectoryExist pathAsString
   if isFolder
     then do
-      files <- getDirectoryContents pathAsString >>= return . map (cs . (pathAsString </>))
+      files <- getDirectoryContents pathAsString >>= return . map (T.pack . (pathAsString </>))
       let allLocaleFiles = [ file | file <- files, file `notElem` [".", ".."],
                                                    ".yml" `T.isSuffixOf` (T.toLower file),
                                                    (forLocale <> ".") `T.isInfixOf` file ]
@@ -114,29 +112,29 @@ translateFiles apiKey fromLocale intoLocales i18nFiles = do
 
 translateFile :: T.Text -> T.Text -> T.Text -> TVar (Map.Map T.Text T.Text) -> T.Text -> IO [Maybe T.Text]
 translateFile apiKey fromLocale intoLocale cachedTranslations i18nFilePath = do
-  i18nFileExists <- doesFileExist $ cs i18nFilePath
+  i18nFileExists <- doesFileExist $ T.unpack i18nFilePath
   if i18nFileExists
     then do
       setSGR [ SetColor Foreground Vivid Blue ]
       let intoLang = fromMaybe intoLocale $ Map.lookup intoLocale getIntoLocales
-      T.putStr $ "Translating " <> (i18nFilePath & cs & takeFileName & cs) <> " into " <> intoLang <> "...\n"
+      T.putStr $ "Translating " <> (i18nFilePath & T.unpack & takeFileName & T.pack) <> " into " <> intoLang <> "...\n"
       tlsManager <- HTTP.newManager HTTP.tlsManagerSettings
-      fileLines <- (T.readFile $ cs i18nFilePath) >>= return . T.lines . cs
+      fileLines <- (T.readFile $ T.unpack i18nFilePath) >>= return . T.lines
       translatedLines <- mapConcurrently (translateLines 1 10 apiKey fromLocale intoLocale cachedTranslations tlsManager)
                                          (List.chunksOf 25 $ zip [1..] fileLines) >>= return . concat
-      let i18nFileName = i18nFilePath & cs & takeFileName & cs
+      let i18nFileName = i18nFilePath & T.unpack & takeFileName & T.pack
           translatedFileNameRegex = (RE.regex [] $ fromLocale <> ".")
           translatedFileName = RE.replace translatedFileNameRegex (RE.rtext $ intoLocale <> ".") i18nFileName
-          translatedFilePath = (takeDirectory $ cs i18nFilePath) </> (cs translatedFileName)
+          translatedFilePath = (takeDirectory $ T.unpack i18nFilePath) </> (T.unpack translatedFileName)
           outputStr = T.unlines translatedLines
       outputAttempt <- try $ T.writeFile translatedFilePath outputStr :: IO (Either SomeException ())
       case outputAttempt of
         Left err -> do
-          let errorMessage = i18nFileName <> ": " <> (cs $ displayException err)
+          let errorMessage = i18nFileName <> ": " <> (T.pack $ displayException err)
           return [ Just errorMessage ]
         Right _ -> do
           setSGR [ SetColor Foreground Vivid Cyan ]
-          T.putStr $ "Created new file: " <> (cs translatedFilePath) <> "\n"
+          T.putStr $ "Created new file: " <> (T.pack translatedFilePath) <> "\n"
           setSGR [ Reset ]
           return [ Nothing ]
     else
@@ -225,14 +223,14 @@ getGoogleAPITranslation apiKey fromLocale intoLocale tlsManager term = do
                            HTTP.responseTimeout = Just 30000000,
                            HTTP.secure = True
                          }
-  let queryParams = [ ("key", Just $ cs apiKey),
-                      ("source", Just $ cs fromLocale),
-                      ("target", Just $ cs intoLocale),
-                      ("q", Just $ cs term) ]
+  let queryParams = [ ("key", Just $ TE.encodeUtf8 apiKey),
+                      ("source", Just $ TE.encodeUtf8 fromLocale),
+                      ("target", Just $ TE.encodeUtf8 intoLocale),
+                      ("q", Just $ TE.encodeUtf8 term) ]
   let trRequestWithParams = HTTP.setQueryString queryParams translateRequest
   runResourceT $ do
     response <- HTTP.httpLbs trRequestWithParams tlsManager
-    let responseBody = cs $ HTTP.responseBody response
+    let responseBody = TE.decodeUtf8 $ LBS.toStrict $ HTTP.responseBody response
     return responseBody
 
 
