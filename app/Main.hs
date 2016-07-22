@@ -93,10 +93,9 @@ getSourceYAMLPaths i18nFolderPath forLocale = do
   if isFolder
     then do
       files <- getDirectoryContents pathAsString >>= return . map (T.pack . (pathAsString </>))
-      let allLocaleFiles = [ file | file <- files, file `notElem` [".", ".."],
-                                                   ".yml" `T.isSuffixOf` (T.toLower file),
-                                                   (forLocale <> ".") `T.isInfixOf` file ]
-      return allLocaleFiles
+      return [ file | file <- files, file `notElem` [".", ".."],
+                                     ".yml" `T.isSuffixOf` (T.toLower file),
+                                     (forLocale <> ".") `T.isInfixOf` file ]
     else
       return []
 
@@ -171,7 +170,6 @@ translateLine attempt maxAttempts apiKey fromLocale intoLocale cachedTranslation
                           let valueToTranslate = substituteForYAMLParams "**" (removeSurroundingQuotes value)
                           translationAttempt <- try $ getGoogleAPITranslation apiKey fromLocale intoLocale
                                                                               tlsManager valueToTranslate :: IO (Either SomeException T.Text)
-                          --let translationJSONText = "{\"data\": { \"translations\": [{\"translatedText\": \"algo aqui\"} ]}}"
                           case translationAttempt of
                             Left _err -> do
                               threadDelay $ (delayFromLineNumber lineNum) * 1000 -- Convert to microseconds
